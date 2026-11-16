@@ -54,3 +54,18 @@
 .o-empty{text-align:center;color:#7a7364;padding:40px 0}
 .o-ok{color:#2b6a2a;font-size:.85rem;margin-top:10px;min-height:1.2em}
 .o-note{background:#fbf3d9;border:1px solid #ecd98e;border-radius:12px;padding:10px 14px;font-size:.85rem;margin-bottom:14px;color:#5a4a12}
+
+/* صور بالجملة + الذكاء الاصطناعي */
+.o-bar2{height:10px;background:#efe7cf;border-radius:10px;overflow:hidden;margin:14px 0 0}
+.o-bar2 i{display:block;height:100%;width:0;background:linear-gradient(90deg,#a8851c,#d4af37);transition:width .3s}
+.o-bulkbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.o-bulkbar input{flex:1 1 120px;min-width:0;padding:9px 12px;border:1px solid #ddd2b6;border-radius:10px;font-family:inherit;background:#fff;color:#17140e}
+.o-draft{display:flex;gap:10px;align-items:flex-start;background:#fff;border:1px solid #ece5d2;border-radius:14px;padding:10px;margin-bottom:10px}
+.o-draft.bad{border-color:#d4574e;background:#fff4f3}
+.o-draft .th{width:84px;height:84px;border-radius:10px;overflow:hidden;flex:none;background:#f6efdc}
+.o-draft .th img{width:100%;height:100%;object-fit:cover}
+.o-draft .f{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.o-draft .f input,.o-draft .f textarea{width:100%;padding:8px 10px;border:1px solid #ddd2b6;border-radius:9px;font-family:inherit;font-size:.9rem;background:#fff;color:#17140e}
+.o-draft .two{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.o-ai{border:1px solid #ece5d2;border-radius:12px;padding:8px 12px;background:#fffdf6}
+.o-ai summary{cursor:pointer;font-weight:700;color:#8a6d1c}
