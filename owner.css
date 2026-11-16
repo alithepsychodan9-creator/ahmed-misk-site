@@ -103,3 +103,15 @@
 .o-chip i{width:14px;height:14px;border-radius:50%;display:inline-block}
 .o-sw{display:flex;height:34px;border-radius:10px;overflow:hidden;margin-top:14px;border:1px solid #ddd2b6}
 .o-sw i{flex:1}
+
+/* إصلاحات الشكل */
+.o-selbar .o-btn.ghost{color:#e3c56f;border-color:#8a7330;background:transparent}
+.o-selbar .o-btn{white-space:nowrap}
+.o-cat>summary{flex-wrap:wrap}
+.o-cact{width:100%;justify-content:flex-end}
+.o-cact .o-btn{white-space:nowrap}
+.o-cat .o-row{flex-wrap:wrap}
+.o-cat .o-row .tx{flex:1 1 140px}
+.o-cat .o-row .tx b{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.4}
+.o-row .tx small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.o-cat .o-row .act{width:100%;justify-content:flex-end;padding-top:2px}
