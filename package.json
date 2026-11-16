@@ -1,8 +1,0 @@
-{
-  "name": "ahmed-misk-jewelry",
-  "version": "1.0.0",
-  "private": true,
-  "description": "موقع مجوهرات أحمد مسك مع لوحة المالك",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" }
-}
