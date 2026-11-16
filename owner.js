@@ -3,12 +3,14 @@
   'use strict';
   const E = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const say = t => (typeof toast === 'function' ? toast(t) : alert(t));
-  const money = n => Number(n).toLocaleString('en-US') + ' ' + (typeof SETTINGS !== 'undefined' ? SETTINGS.currency : '');
-  let tab = 'products', data = { products: [], orders: [], settings: {} }, editing = null, pendingImage = '', origImage = '', lastBlob = null;
+  const parseTheme = t => { try { const o = typeof t === 'string' ? JSON.parse(t) : t; return o && [o.a, o.d, o.b].every(v => Number.isFinite(+v)) ? { a: +o.a, d: +o.d, b: +o.b } : null; } catch (e) { return null; } };
+  const DEF_THEME = { a: 46, d: 40, b: 43 };
+  const sqlHint = e => (/column|schema cache|theme|map_url/i.test(e.message || '') ? 'شغّل أمر SQL الإضافي أولاً (الموجود بالتعليمات) ثم أعد المحاولة' : e.message);
+  let sel = new Set(), openCats = new Set(), tab = 'products', data = { products: [], orders: [], settings: {} }, editing = null, pendingImage = '', origImage = '', lastBlob = null;
   let bulk = null; /* { phase: 'pick' | 'run' | 'review', drafts: [], notes: [] } */
 
   const mapP = r => ({ id: +r.id, name: r.name, cat: r.cat, price: +r.price, desc: r.descr || '', image: r.image || '', available: r.available !== false });
-  const mapS = r => ({ whatsapp: r.whatsapp, instagram: r.instagram, currency: r.currency, heroTitle: r.hero_title, heroText: r.hero_text });
+  const mapS = r => ({ whatsapp: r.whatsapp, instagram: r.instagram, mapUrl: r.map_url || '', theme: r.theme || '', heroTitle: r.hero_title, heroText: r.hero_text });
 
   /* ---------- الذكاء الاصطناعي (Gemini المجاني) — المفتاح يُحفظ على جهاز المالك فقط ---------- */
   const AIK = 'ahmed_misk_ai', DEFAULT_MODEL = 'gemini-3.1-flash-lite';
@@ -45,12 +47,16 @@
         '- name: اسم قصير وجذاب (حتى 50 حرفاً) مثل «خاتم سوليتير ذهب».\n' +
         '- cat: قسم المنتج. استخدم أحد الأقسام الموجودة إن كان مناسباً: ' + (cats.join('، ') || 'لا توجد أقسام بعد') + '. وإلا اقترح اسم قسم جديد قصير (كلمة أو كلمتين).\n' +
         '- desc: وصف جميل من جملة أو جملتين (حتى 200 حرف).\n' +
+        '- weight: اقرأ الوزن فقط إذا كان مكتوباً بوضوح داخل الصورة (على ميزان أو بطاقة أو ملصق) واكتبه هكذا «الوزن: 5.2 غرام». إن لم يظهر رقم واضح اترك الحقل فارغاً ولا تخمّن أبداً.\n' +
         'لا تذكر السعر ولا الوزن ولا العيار ولا نوع الأحجار إلا إذا كان واضحاً جداً في الصورة، ولا تخترع معلومات.';
-      const schema = { type: 'OBJECT', properties: { name: { type: 'STRING' }, cat: { type: 'STRING' }, desc: { type: 'STRING' } }, required: ['name', 'cat', 'desc'] };
+      const schema = { type: 'OBJECT', properties: { name: { type: 'STRING' }, cat: { type: 'STRING' }, desc: { type: 'STRING' }, weight: { type: 'STRING' } }, required: ['name', 'cat', 'desc'] };
       const d = await this.call([{ text: prompt }, { inline_data: { mime_type: 'image/jpeg', data } }], schema, onWait);
       const parts = d && d.candidates && d.candidates[0] && d.candidates[0].content && d.candidates[0].content.parts;
       let j; try { j = JSON.parse((parts || []).map(p => p.text || '').join('')); } catch (e) { throw new Error('رد غير مفهوم من الذكاء الاصطناعي'); }
-      return { name: String(j.name || '').trim().slice(0, 100), cat: String(j.cat || '').trim().slice(0, 40), desc: String(j.desc || '').trim().slice(0, 300) };
+      const w = String(j.weight || '').trim().slice(0, 40);
+      let desc = String(j.desc || '').trim().slice(0, 240);
+      if (w && /\d/.test(w) && !desc.includes(w)) desc = (desc + (desc ? '\n' : '') + w).slice(0, 300);
+      return { name: String(j.name || '').trim().slice(0, 100), cat: String(j.cat || '').trim().slice(0, 40), desc };
     }
   };
   function aiCfgHTML() {
@@ -158,42 +164,68 @@
       if (bulk && !leaveBulk()) return;
       tab = b.dataset.t; editing = null; render();
     });
+    if (tab !== 'settings' && window.applyTheme) window.applyTheme(parseTheme(data.settings.theme));
     ({ products: viewProducts, orders: viewOrders, settings: viewSettings, account: viewAccount })[tab]();
   }
   async function refreshStore() { if (typeof loadStore === 'function') await loadStore(); }
 
-  /* --- المنتجات --- */
+  /* --- المنتجات (مقسّمة حسب الأقسام) --- */
+  const thumbOf = p => p && p.image ? `<img src="${E(SB.thumb(p.image))}" onerror="this.onerror=null;this.src='${E(SB.img(p.image))}'" alt="">` : '💎';
+  async function deleteProducts(ids) {
+    const ps = data.products.filter(p => ids.includes(p.id)); if (!ps.length) return;
+    try {
+      for (let i = 0; i < ps.length; i += 40) await guard(() => SB.del('products?id=in.(' + ps.slice(i, i + 40).map(p => +p.id).join(',') + ')'));
+      ps.forEach(p => { SB.removeImage(p.image); sel.delete(p.id); });
+      data.products = data.products.filter(p => !ids.includes(p.id)); render(); refreshStore(); say('تم حذف ' + ps.length + ' منتج');
+    } catch (e) { say(e.message); }
+  }
   function viewProducts() {
     if (bulk) return viewBulk();
     if (editing !== null) return viewProductForm();
-    const list = data.products;
+    const list = data.products, groups = {};
+    list.forEach(p => (groups[p.cat] = groups[p.cat] || []).push(p));
+    const cats = Object.keys(groups);
+    [...sel].forEach(id => { if (!list.some(p => p.id === id)) sel.delete(id); });
     $o('oBody').innerHTML = `
-      <div class="o-bar"><b>${list.length} منتج</b><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="o-btn ghost" id="oBulk">🖼️ صور بالجملة</button><button class="o-btn gold" id="oAdd">＋ إضافة منتج</button></div></div>
-      ${list.map(p => `
-        <div class="o-row">
-          <div class="th">${p.image ? `<img src="${E(SB.img(p.image))}" alt="">` : '💎'}</div>
-          <div class="tx"><b>${E(p.name)}</b><small>${E(p.cat)} · ${money(p.price)}</small>
-            <span class="o-tag ${p.available === false ? 'off' : 'on'}">${p.available === false ? 'نفد' : 'متوفر'}</span></div>
-          <div class="act"><button class="o-btn ghost sm" data-e="${+p.id}">تعديل</button><button class="o-btn danger sm" data-d="${+p.id}">حذف</button></div>
-        </div>`).join('') || '<div class="o-empty">لا توجد منتجات بعد. اضغط «إضافة منتج».</div>'}`;
+      <div class="o-bar"><b>${list.length} منتج · ${cats.length} قسم</b><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="o-btn ghost" id="oBulk">🖼️ صور بالجملة</button><button class="o-btn gold" id="oAdd">＋ إضافة منتج</button></div></div>
+      <div class="o-selbar" id="oSelBar" ${sel.size ? '' : 'hidden'}><span>المحدد: <b id="oSelN">${sel.size}</b></span><span style="display:flex;gap:6px"><button class="o-btn danger sm" id="oDelSel">🗑 حذف المحدد</button><button class="o-btn ghost sm" id="oSelClr">إلغاء التحديد</button></span></div>
+      ${cats.map(c => { const ps = groups[c]; return `
+        <details class="o-cat" data-c="${E(c)}" ${openCats.has(c) ? 'open' : ''}>
+          <summary><span class="o-cth">${thumbOf(ps.find(p => p.image) || ps[0])}</span><b>${E(c)}</b><i>${ps.length}</i>
+            <span class="o-cact"><button type="button" class="o-btn ghost sm" data-sa="${E(c)}">تحديد الكل</button><button type="button" class="o-btn danger sm" data-dc="${E(c)}">حذف القسم</button></span></summary>
+          ${ps.map(p => `
+            <div class="o-row">
+              <label class="o-pick"><input type="checkbox" data-pk="${+p.id}" ${sel.has(p.id) ? 'checked' : ''}></label>
+              <div class="th">${thumbOf(p)}</div>
+              <div class="tx"><b>${E(p.name)}</b><small>${E((p.desc || '').split('\n')[0]).slice(0, 60)}</small>
+                <span class="o-tag ${p.available === false ? 'off' : 'on'}">${p.available === false ? 'نفد' : 'متوفر'}</span></div>
+              <div class="act"><button class="o-btn ghost sm" data-e="${+p.id}">تعديل</button><button class="o-btn danger sm" data-d="${+p.id}">حذف</button></div>
+            </div>`).join('')}
+        </details>`; }).join('') || '<div class="o-empty">لا توجد منتجات بعد. اضغط «إضافة منتج» أو «صور بالجملة».</div>'}`;
+    const body = $o('oBody'), syncSel = () => { $o('oSelBar').hidden = !sel.size; $o('oSelN').textContent = sel.size; };
     $o('oAdd').onclick = () => { editing = 0; pendingImage = ''; origImage = ''; lastBlob = null; render(); };
     $o('oBulk').onclick = () => { bulk = { phase: 'pick', drafts: [], notes: [] }; render(); };
-    $o('oBody').querySelectorAll('[data-e]').forEach(b => b.onclick = () => {
+    $o('oSelClr').onclick = () => { sel.clear(); render(); };
+    $o('oDelSel').onclick = () => { if (confirm('حذف ' + sel.size + ' منتج نهائياً؟')) deleteProducts([...sel]); };
+    body.querySelectorAll('details.o-cat').forEach(d => d.addEventListener('toggle', () => { d.open ? openCats.add(d.dataset.c) : openCats.delete(d.dataset.c); }));
+    body.querySelectorAll('[data-pk]').forEach(c => c.onchange = () => { c.checked ? sel.add(+c.dataset.pk) : sel.delete(+c.dataset.pk); syncSel(); });
+    body.querySelectorAll('[data-sa]').forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); groups[b.dataset.sa].forEach(p => sel.add(p.id)); openCats.add(b.dataset.sa); render(); });
+    body.querySelectorAll('[data-dc]').forEach(b => b.onclick = e => {
+      e.preventDefault(); e.stopPropagation();
+      const ps = groups[b.dataset.dc];
+      if (confirm('حذف القسم «' + b.dataset.dc + '» مع كل منتجاته (' + ps.length + ') نهائياً؟')) deleteProducts(ps.map(p => p.id));
+    });
+    body.querySelectorAll('[data-e]').forEach(b => b.onclick = () => {
       editing = +b.dataset.e; lastBlob = null; origImage = pendingImage = (data.products.find(p => p.id === editing) || {}).image || ''; render();
     });
-    $o('oBody').querySelectorAll('[data-d]').forEach(b => b.onclick = async () => {
+    body.querySelectorAll('[data-d]').forEach(b => b.onclick = () => {
       const p = data.products.find(x => x.id === +b.dataset.d);
-      if (!confirm('حذف «' + p.name + '» نهائياً؟')) return;
-      try {
-        await guard(() => SB.del('products?id=eq.' + p.id));
-        SB.removeImage(p.image);
-        data.products = data.products.filter(x => x.id !== p.id); render(); refreshStore(); say('تم الحذف');
-      } catch (e) { say(e.message); }
+      if (confirm('حذف «' + p.name + '» نهائياً؟')) deleteProducts([p.id]);
     });
   }
 
   function viewProductForm() {
-    const p = editing ? data.products.find(x => x.id === editing) : { name: '', cat: '', price: '', desc: '', available: true };
+    const p = editing ? data.products.find(x => x.id === editing) : { name: '', cat: '', desc: '', available: true };
     const cats = [...new Set(data.products.map(x => x.cat))];
     $o('oBody').innerHTML = `
       <form class="o-form" id="pForm">
@@ -207,7 +239,6 @@
         <label class="o-field">اسم المنتج<input id="pName" maxlength="100" required value="${E(p.name)}"></label>
         <label class="o-field">القسم<input id="pCat" list="pCats" maxlength="40" required value="${E(p.cat)}" placeholder="مثال: خواتم">
           <datalist id="pCats">${cats.map(c => `<option value="${E(c)}">`).join('')}</datalist></label>
-        <label class="o-field">السعر<input id="pPrice" type="number" min="0" step="1" inputmode="numeric" required value="${E(p.price)}"></label>
         <label class="o-field">وصف (اختياري)<textarea id="pDesc" rows="2" maxlength="300">${E(p.desc || '')}</textarea></label>
         <label class="o-chk"><input type="checkbox" id="pAv" ${p.available === false ? '' : 'checked'}> متوفر للبيع</label>
         <div class="o-err" id="pErr"></div>
@@ -222,7 +253,7 @@
       $o('pErr').textContent = ''; $o('pUp').textContent = 'الذكاء الاصطناعي يحلل الصورة...'; $o('pAi').disabled = true;
       try {
         const src = lastBlob || await (await fetch(SB.img(pendingImage))).blob();
-        const r = await ai.describe(await shrink(src, 640), [...new Set(data.products.map(x => x.cat))], m => ($o('pUp').textContent = m));
+        const r = await ai.describe(await shrink(src, 1024, 0.85), [...new Set(data.products.map(x => x.cat))], m => ($o('pUp').textContent = m));
         if (!$o('pName').value.trim()) $o('pName').value = r.name;
         if (!$o('pCat').value.trim()) $o('pCat').value = r.cat;
         if (!$o('pDesc').value.trim()) $o('pDesc').value = r.desc;
@@ -234,18 +265,17 @@
       const f = e.target.files[0]; if (!f) return;
       $o('pUp').textContent = 'جاري رفع الصورة...'; $o('pErr').textContent = '';
       try {
-        const blob = await shrink(f, 1100);
-        const name = await guard(() => SB.upload(blob));
+        const blob = await shrink(f, 1800, 0.9), th = await shrink(blob, 520, 0.8);
+        const name = await guard(() => SB.upload(blob, th));
         lastBlob = blob;
         discardNew(); pendingImage = name; $o('pPrev').innerHTML = `<img src="${E(SB.img(name))}" alt="">`; $o('pUp').textContent = 'تم رفع الصورة ✓';
       } catch (err) { $o('pUp').textContent = ''; $o('pErr').textContent = err.message; }
     };
     $o('pForm').onsubmit = async e => {
       e.preventDefault(); $o('pErr').textContent = '';
-      const price = Math.round(Number($o('pPrice').value));
-      if (!(price >= 0)) return ($o('pErr').textContent = 'السعر غير صحيح');
       $o('pSave').disabled = true;
-      const body = { name: $o('pName').value.trim(), cat: $o('pCat').value.trim(), price, descr: $o('pDesc').value.trim(), image: pendingImage, available: $o('pAv').checked };
+      const body = { name: $o('pName').value.trim(), cat: $o('pCat').value.trim(), descr: $o('pDesc').value.trim(), image: pendingImage, available: $o('pAv').checked };
+      if (!editing) body.price = 0;
       try {
         const r = await guard(() => editing ? SB.patch('products?id=eq.' + editing, body) : SB.post('products', body));
         if (!r || !r[0]) throw new Error('تعذر الحفظ، تحقق من صلاحيتك');
@@ -270,7 +300,7 @@
     if (bulk.phase === 'review') return viewBulkReview();
     $o('oBody').innerHTML = `
       <div class="o-form" style="padding-top:14px"><h3>إضافة صور بالجملة</h3>
-        <div class="o-note">اختر حتى ${MAX_BULK} صورة من الاستوديو مرة وحدة (اضغط مطولاً على أول صورة ثم حدد الباقي). بعدها تراجع الأسماء وتضيف الأسعار وتنشر الكل.</div>
+        <div class="o-note">اختر حتى ${MAX_BULK} صورة من الاستوديو مرة وحدة (اضغط مطولاً على أول صورة ثم حدد الباقي). بعدها تراجع الأسماء والأقسام وتنشر الكل.</div>
         <input type="file" id="bFiles" accept="image/*" multiple hidden>
         <label class="o-chk"><input type="checkbox" id="bAi" ${ai.on() ? 'checked' : 'disabled'}> ✨ تعبئة الاسم والقسم والوصف بالذكاء الاصطناعي ${ai.on() ? '' : '(اربطه من الأسفل أول)'}</label>
         <button class="o-btn gold full" id="bPick">📷 اختيار الصور من الاستوديو</button>
@@ -320,12 +350,12 @@
     let idx = 0;
     async function worker() {
       while (idx < files.length && !stop) {
-        const f = files[idx++], d = { image: '', name: '', cat: '', desc: '', price: '', blob: null };
+        const f = files[idx++], d = { image: '', name: '', cat: '', desc: '', blob: null };
         try {
-          const blob = await shrink(f, 1100);
-          d.image = await guard(() => SB.upload(blob));
+          const blob = await shrink(f, 1800, 0.9), th = await shrink(blob, 520, 0.8);
+          d.image = await guard(() => SB.upload(blob, th));
           drafts.push(d);
-          if (useAI && !aiFatal) { d.blob = await shrink(blob, 640); aiQ.push(d); pump(); } else aid++;
+          if (useAI && !aiFatal) { d.blob = await shrink(blob, 1024, 0.85); aiQ.push(d); pump(); } else aid++;
         } catch (e) { bulk.notes.push((f.name || 'صورة') + ': ' + e.message); aid++; if (e.status === 401 || e.status === 403) stop = true; }
         up++; stat();
       }
@@ -344,10 +374,8 @@
     $o('oBody').innerHTML = `
       <div class="o-bar"><b>${ds.length} منتج للمراجعة</b><button class="o-btn danger sm" id="bCancel">إلغاء الكل</button></div>
       ${bulk.notes.map(n => `<div class="o-note">${E(n)}</div>`).join('')}
-      <div class="o-note">راجع كل بطاقة وحط السعر. وتكدر تعبّي الفارغ دفعة وحدة:</div>
+      <div class="o-note">راجع كل بطاقة (الاسم والقسم والوصف). وتكدر تعبّي القسم الفارغ دفعة وحدة:</div>
       <div class="o-bulkbar">
-        <input id="bAllPrice" type="number" min="0" inputmode="numeric" placeholder="سعر لكل الفارغ">
-        <button class="o-btn ghost sm" id="bApplyPrice">تطبيق</button>
         <input id="bAllCat" list="bCats" maxlength="40" placeholder="قسم لكل الفارغ">
         <button class="o-btn ghost sm" id="bApplyCat">تطبيق</button></div>
       <datalist id="bCats">${cats.map(c => `<option value="${E(c)}">`).join('')}</datalist>
@@ -356,7 +384,7 @@
           <div class="th"><img src="${E(SB.img(d.image))}" alt=""></div>
           <div class="f">
             <input data-f="name" maxlength="100" placeholder="اسم المنتج" value="${E(d.name)}">
-            <div class="two"><input data-f="cat" list="bCats" maxlength="40" placeholder="القسم" value="${E(d.cat)}"><input data-f="price" type="number" min="0" inputmode="numeric" placeholder="السعر" value="${E(d.price)}"></div>
+            <input data-f="cat" list="bCats" maxlength="40" placeholder="القسم" value="${E(d.cat)}">
             <textarea data-f="desc" rows="2" maxlength="300" placeholder="وصف (اختياري)">${E(d.desc)}</textarea></div>
           <button class="o-btn danger sm" data-x="${i}" aria-label="حذف">✕</button>
         </div>`).join('')}</div>
@@ -371,17 +399,16 @@
       if (!bulk.drafts.length) { bulk.phase = 'pick'; } render();
     });
     $o('bCancel').onclick = () => { if (leaveBulk()) render(); };
-    $o('bApplyPrice').onclick = () => { const v = $o('bAllPrice').value; if (v === '') return; bulk.drafts.forEach(d => { if (d.price === '') d.price = v; }); viewBulkReview(); };
     $o('bApplyCat').onclick = () => { const v = $o('bAllCat').value.trim(); if (!v) return; bulk.drafts.forEach(d => { if (!d.cat.trim()) d.cat = v.slice(0, 40); }); viewBulkReview(); };
     $o('bPublish').onclick = async () => {
       $o('bErr').textContent = '';
       const ok = [], rows = L.querySelectorAll('.o-draft');
       bulk.drafts.forEach((d, i) => {
-        const price = d.price === '' ? NaN : Math.round(Number(d.price)), good = d.name.trim() && d.cat.trim() && price >= 0;
-        if (good) ok.push({ d, row: { name: d.name.trim().slice(0, 100), cat: d.cat.trim().slice(0, 40), price, descr: d.desc.trim().slice(0, 300), image: d.image, available: $o('bAv').checked } });
+        const good = d.name.trim() && d.cat.trim();
+        if (good) ok.push({ d, row: { name: d.name.trim().slice(0, 100), cat: d.cat.trim().slice(0, 40), price: 0, descr: d.desc.trim().slice(0, 300), image: d.image, available: $o('bAv').checked } });
         else rows[i].classList.add('bad');
       });
-      if (!ok.length) return ($o('bErr').textContent = 'أكمل الاسم والقسم والسعر للبطاقات المظلّلة');
+      if (!ok.length) return ($o('bErr').textContent = 'أكمل الاسم والقسم للبطاقات المظلّلة');
       $o('bPublish').disabled = true; $o('bPublish').textContent = 'جاري النشر...';
       const saved = [];
       try {
@@ -403,7 +430,7 @@
     };
   }
 
-  function shrink(file, max) {
+  function shrink(file, max, qual) {
     return new Promise((res, rej) => {
       const img = new Image(), url = URL.createObjectURL(file);
       img.onload = () => {
@@ -411,7 +438,7 @@
         const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
         const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
-        c.toBlob(b => b ? res(b) : rej(new Error('تعذر معالجة الصورة')), 'image/jpeg', 0.86);
+        c.toBlob(b => b ? res(b) : rej(new Error('تعذر معالجة الصورة')), 'image/jpeg', qual || 0.86);
       };
       img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('الملف ليس صورة')); };
       img.src = url;
@@ -428,8 +455,7 @@
       return `<div class="o-order">
         <header><b>طلب #${+o.id}</b><small>${E(new Date(o.created_at).toLocaleString('ar-IQ'))}</small></header>
         <div class="meta">👤 ${E(o.name)}<br>📞 <a href="tel:${E(ph)}">${E(o.phone)}</a> · <a target="_blank" rel="noopener" href="https://wa.me/${E(ph)}">واتساب</a><br>📍 ${E(o.address)}</div>
-        <ul>${items.map(i => `<li>${E(i.name)} × ${+i.qty} — ${money(i.price * i.qty)}</li>`).join('')}</ul>
-        <div class="o-total">المجموع: ${money(o.total)}</div>
+        <div class="o-items">${items.map(i => { const pr = data.products.find(x => x.id === +i.id); return `<div class="o-oi"><div class="th">${pr && pr.image ? thumbOf(pr) : '💎'}</div><div class="tx"><b>${E(i.name)} × ${+i.qty}</b><small>${E(pr ? pr.cat : '')}${pr && pr.desc ? ' · ' + E(pr.desc.split('\n')[0]).slice(0, 70) : ''}</small></div></div>`; }).join('')}</div>
         <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
           <select data-s="${+o.id}">${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${o.status === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
           <button class="o-btn danger sm" data-od="${+o.id}">حذف</button></div></div>`;
@@ -446,29 +472,65 @@
   }
 
   /* --- الإعدادات --- */
+  const PRESETS = [['ذهبي كلاسيك', { a: 46, d: 40, b: 43 }], ['وردي ذهبي', { a: 14, d: 12, b: 18 }], ['زمردي', { a: 152, d: 160, b: 140 }], ['أزرق ملكي', { a: 215, d: 222, b: 210 }], ['عنابي', { a: 350, d: 345, b: 350 }], ['بنفسجي', { a: 275, d: 270, b: 270 }]];
   function viewSettings() {
-    const s = data.settings;
+    const s = data.settings, th = parseTheme(s.theme) || DEF_THEME;
     $o('oBody').innerHTML = `
       <form class="o-form" id="sForm"><h3 style="margin-top:14px">إعدادات الموقع</h3>
         <label class="o-field">رقم الواتساب (صيغة دولية بدون + مثل 9647701234567)<input id="sWa" inputmode="numeric" dir="ltr" value="${E(s.whatsapp)}"></label>
         <label class="o-field">حساب الانستغرام (بدون @)<input id="sIg" dir="ltr" value="${E(s.instagram)}"></label>
-        <label class="o-field">العملة<input id="sCur" maxlength="10" value="${E(s.currency)}"></label>
+        <label class="o-field">رابط موقع المحل على خرائط Google<input id="sMap" dir="ltr" inputmode="url" placeholder="https://maps.app.goo.gl/..." value="${E(s.mapUrl)}"></label>
+        <div class="o-note" style="margin-top:8px">من تطبيق خرائط Google: افتح موقع المحل ← <b>مشاركة</b> ← <b>نسخ الرابط</b> والصقه هنا. اتركه فارغاً لإخفاء الزر.</div>
         <label class="o-field">العنوان الرئيسي<input id="sT" maxlength="80" value="${E(s.heroTitle)}"></label>
         <label class="o-field">النص تحت العنوان<textarea id="sD" rows="2" maxlength="300">${E(s.heroText)}</textarea></label>
         <div class="o-err" id="sErr"></div>
         <button class="o-btn gold full" type="submit">حفظ الإعدادات</button></form>
+      <form class="o-form" id="tForm" style="margin-top:14px;padding-top:14px"><h3>🎨 ألوان الموقع</h3>
+        <div class="o-note">حرّك الأشرطة وشوف اللون يتغير مباشرة على الموقع، وبعدها اضغط «حفظ الألوان».</div>
+        <div class="o-pre">${PRESETS.map(([n, v], i) => `<button type="button" class="o-chip" data-pre="${i}"><i style="background:hsl(${v.a} 66% 46%)"></i>${n}</button>`).join('')}</div>
+        <label class="o-field">لون التمييز (الذهبي)<input class="o-hue ha" type="range" min="0" max="360" id="tA" value="${th.a}"></label>
+        <label class="o-field">لون الأزرار والعناصر الداكنة<input class="o-hue hd" type="range" min="0" max="360" id="tD" value="${th.d}"></label>
+        <label class="o-field">لون خلفية الصفحة<input class="o-hue hb" type="range" min="0" max="360" id="tB" value="${th.b}"></label>
+        <div class="o-sw" id="tSw"></div>
+        <div class="o-err" id="tErr"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="o-btn gold" type="submit">حفظ الألوان</button><button class="o-btn ghost" type="button" id="tReset">الألوان الأصلية</button></div></form>
       <div class="o-form" style="margin-top:14px;padding-top:14px">${aiCfgHTML()}</div>`;
     bindAiCfg();
+    const cur = () => ({ a: +$o('tA').value, d: +$o('tD').value, b: +$o('tB').value });
+    const preview = () => {
+      const t = cur();
+      if (window.applyTheme) window.applyTheme(t);
+      $o('tSw').innerHTML = [`hsl(${t.b} 45% 97%)`, `hsl(${t.a} 66% 46%)`, `hsl(${t.a} 69% 67%)`, `hsl(${t.d} 18% 8%)`].map(c => `<i style="background:${c}"></i>`).join('');
+    };
+    ['tA', 'tD', 'tB'].forEach(id => $o(id).addEventListener('input', preview));
+    document.querySelectorAll('[data-pre]').forEach(b => b.onclick = () => { const v = PRESETS[+b.dataset.pre][1]; $o('tA').value = v.a; $o('tD').value = v.d; $o('tB').value = v.b; preview(); });
+    preview();
+    $o('tForm').onsubmit = async e => {
+      e.preventDefault(); $o('tErr').textContent = '';
+      try {
+        const r = await guard(() => SB.patch('settings?id=eq.1', { theme: JSON.stringify(cur()) }));
+        if (!r || !r[0]) throw new Error('تعذر الحفظ، تحقق من صلاحيتك');
+        data.settings = mapS(r[0]); refreshStore(); say('تم حفظ الألوان ✓');
+      } catch (err) { $o('tErr').textContent = sqlHint(err); }
+    };
+    $o('tReset').onclick = async () => {
+      try {
+        const r = await guard(() => SB.patch('settings?id=eq.1', { theme: '' }));
+        if (!r || !r[0]) throw new Error('تعذر الحفظ');
+        data.settings = mapS(r[0]); if (window.applyTheme) window.applyTheme(null); refreshStore(); viewSettings(); say('رجعت الألوان الأصلية ✓');
+      } catch (err) { $o('tErr').textContent = sqlHint(err); }
+    };
     $o('sForm').onsubmit = async e => {
       e.preventDefault(); $o('sErr').textContent = '';
-      const wa = $o('sWa').value.replace(/\D/g, ''), ig = $o('sIg').value.trim().replace(/^@/, '');
+      const wa = $o('sWa').value.replace(/\D/g, ''), ig = $o('sIg').value.trim().replace(/^@/, ''), map = $o('sMap').value.trim();
       if (wa.length < 8 || wa.length > 15) return ($o('sErr').textContent = 'رقم الواتساب غير صحيح (صيغة دولية بدون +)');
       if (!/^[A-Za-z0-9._]{1,30}$/.test(ig)) return ($o('sErr').textContent = 'اسم حساب الانستغرام غير صحيح');
+      if (map && (!window.safeMap || window.safeMap(map) !== map)) return ($o('sErr').textContent = 'رابط الخريطة لازم يكون رابط مشاركة من خرائط Google (https://maps.app.goo.gl/...)');
       try {
-        const r = await guard(() => SB.patch('settings?id=eq.1', { whatsapp: wa, instagram: ig, currency: $o('sCur').value.trim() || 'د.ع', hero_title: $o('sT').value.trim(), hero_text: $o('sD').value.trim() }));
+        const r = await guard(() => SB.patch('settings?id=eq.1', { whatsapp: wa, instagram: ig, map_url: map, hero_title: $o('sT').value.trim(), hero_text: $o('sD').value.trim() }));
         if (!r || !r[0]) throw new Error('تعذر الحفظ، تحقق من صلاحيتك');
         data.settings = mapS(r[0]); refreshStore(); say('تم حفظ الإعدادات ✓');
-      } catch (err) { $o('sErr').textContent = err.message; }
+      } catch (err) { $o('sErr').textContent = sqlHint(err); }
     };
   }
 

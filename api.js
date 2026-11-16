@@ -54,6 +54,7 @@
     loggedIn: function () { return !!sess; },
     email: function () { return sess ? sess.email : ''; },
     img: function (n) { return n ? URL_ + '/storage/v1/object/public/products/' + n : ''; },
+    thumb: function (n) { return n ? URL_ + '/storage/v1/object/public/products/t_' + n : ''; },
     get: function (p) { return call('GET', '/rest/v1/' + p); },
     post: function (p, b) { return call('POST', '/rest/v1/' + p, { body: b, headers: { Prefer: 'return=representation' } }); },
     patch: function (p, b) { return call('PATCH', '/rest/v1/' + p, { body: b, headers: { Prefer: 'return=representation' } }); },
@@ -62,11 +63,15 @@
     login: async function (email, password) { var d = await authCall('POST', 'token?grant_type=password', { email: String(email).trim(), password: password }); setSession(d); return d; },
     logout: async function () { try { var t = await token(); if (t) await authCall('POST', 'logout', {}, t); } catch (e) {} save(null); },
     changePassword: async function (pw) { var t = await token(); if (!t) { var e = new Error('انتهت الجلسة'); e.status = 401; throw e; } await authCall('PUT', 'user', { password: pw }, t); },
-    upload: async function (blob) {
+    upload: async function (blob, thumb) {
       var ext = blob.type === 'image/png' ? 'png' : blob.type === 'image/webp' ? 'webp' : 'jpg', name = rand24() + '.' + ext;
       await call('POST', '/storage/v1/object/products/' + name, { blob: blob });
+      if (thumb) { try { await call('POST', '/storage/v1/object/products/t_' + name, { blob: thumb }); } catch (e) {} }
       return name;
     },
-    removeImage: function (n) { return n ? call('DELETE', '/storage/v1/object/products/' + n).catch(function () {}) : Promise.resolve(); }
+    removeImage: function (n) {
+      if (!n) return Promise.resolve();
+      return Promise.all([call('DELETE', '/storage/v1/object/products/' + n).catch(function () {}), call('DELETE', '/storage/v1/object/products/t_' + n).catch(function () {})]);
+    }
   };
 })();
