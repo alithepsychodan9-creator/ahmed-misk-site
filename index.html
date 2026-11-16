@@ -276,7 +276,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const BASE = location.origin + location.pathname;
 const waLink = t => `https://wa.me/${SETTINGS.whatsapp}?text=${encodeURIComponent(t)}`;
-const igLink = () => `https://ig.me/m/${SETTINGS.instagram}`;
+const igLink = () => `https://www.instagram.com/${encodeURIComponent(SETTINGS.instagram)}/`;
 const safeMap = u => /^https:\/\/(maps\.app\.goo\.gl|goo\.gl\/maps|(www\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+)\//i.test(u||'') ? u : '';
 window.safeMap = safeMap;
 
@@ -356,7 +356,7 @@ const copyText = async t => {
   try{ const a=document.createElement('textarea'); a.value=t; a.style.position='fixed'; a.style.opacity='0'; document.body.appendChild(a); a.select(); const ok=document.execCommand('copy'); a.remove(); return ok; }catch(e){ return false; }
 };
 const productMsg = p => `السلام عليكم، أريد الاستفسار عن هذا المنتج:\n• ${p.name}\nالقسم: ${p.cat}${p.desc?'\n'+p.desc:''}\n\nصورة المنتج وتفاصيله:\n${BASE}?p=${p.id}`;
-async function igProduct(id){ const p=PRODUCTS.find(x=>x.id==id); if(!p) return; await copyText(productMsg(p)); toast('تم نسخ تفاصيل المنتج، الصقها بالمحادثة'); window.open(igLink(),'_blank'); }
+function igProduct(id){ const p=PRODUCTS.find(x=>x.id==id); if(!p) return; copyText(productMsg(p)); toast('تم نسخ تفاصيل المنتج ✓ اضغط «مراسلة» بانستاكرام والصقها'); window.open(igLink(),'_blank'); }
 const productBtns = (p,cls) => p.available===false ? '<button disabled style="opacity:.5;grid-column:1/-1">غير متوفر</button>' :
   `<button class="add" onclick="add(${+p.id})">🛒 أضف للسلة</button><a class="wa-s" target="_blank" rel="noopener" href="${esc(waLink(productMsg(p)))}">واتساب</a><button class="ig-s" onclick="igProduct(${+p.id})">انستاكرام</button>`;
 
@@ -423,7 +423,7 @@ async function sendOrder(via){
   const link=`${BASE}?order=${ids.map(id=>id+'x'+cart[id]).join(',')}`;
   const msg=`طلب جديد 🛍️\n${lines.join('\n')}\n\nصور المنتجات وتفاصيلها:\n${link}\n\nالاسم: ${name}\nالهاتف: ${phone}\nالعنوان: ${addr}`;
   if(via==='wa'){ window.open(waLink(msg),'_blank'); }
-  else if(via==='ig'){ await copyText(msg); toast('تم نسخ الطلب، الصقه في المحادثة'); window.open(igLink(),'_blank'); }
+  else if(via==='ig'){ copyText(msg); toast('تم نسخ الطلب ✓ اضغط «مراسلة» بانستاكرام والصقه'); window.open(igLink(),'_blank'); }
   else {
     if(!ONLINE) return toast('الطلب عبر الموقع غير مفعّل بعد');
     try{
