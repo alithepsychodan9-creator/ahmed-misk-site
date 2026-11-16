@@ -65,8 +65,8 @@
   function bindAiCfg(done) {
     const msg = $o('aiMsg');
     const store = () => {
-      const key = $o('aiKey').value.trim();
-      if (key && !/^[^\s"'<>]{20,}$/.test(key)) { msg.textContent = 'المفتاح غير صحيح'; return false; }
+      const key = $o('aiKey').value.replace(/\s+/g, '');
+      if (key && key.length < 10) { msg.textContent = 'المفتاح غير صحيح'; return false; }
       ai.set({ key, model: $o('aiModel').value.trim() || DEFAULT_MODEL }); return true;
     };
     $o('aiSave').onclick = () => { if (store()) { msg.textContent = ai.on() ? 'تم الحفظ ✓' : 'تم حذف المفتاح'; if (done) done(); } };
