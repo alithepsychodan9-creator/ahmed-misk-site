@@ -91,7 +91,7 @@ header.scrolled{padding-top:7px;padding-bottom:7px;box-shadow:0 6px 20px rgba(0,
 @keyframes draw{to{width:min(230px,52vw)}}
 @media (prefers-reduced-motion:reduce){*,*::after{animation:none!important;transition:none!important}}
 </style>
-<link rel="stylesheet" href="/owner.css">
+<link rel="stylesheet" href="owner.css">
 <style>
 .hdr-actions{display:flex;gap:8px;align-items:center}
 .owner-btn{background:transparent;color:var(--text);border:1px solid var(--gold);border-radius:30px;padding:8px 14px;font-family:inherit;font-weight:700;cursor:pointer;font-size:.85rem}
@@ -145,6 +145,8 @@ header.scrolled{padding-top:7px;padding-bottom:7px;box-shadow:0 6px 20px rgba(0,
 </aside>
 <div class="toast" id="toast"></div>
 
+<script src="config.js"></script>
+<script src="api.js"></script>
 <script>
 /* ===== بيانات المتجر تأتي من الخادم (لوحة المالك) ===== */
 const FALLBACK = {
@@ -165,12 +167,14 @@ const fmt = n => Number(n).toLocaleString('en-US') + ' ' + SETTINGS.currency;
 const waLink = t => `https://wa.me/${SETTINGS.whatsapp}?text=${encodeURIComponent(t)}`;
 const igLink = () => `https://ig.me/m/${SETTINGS.instagram}`;
 
+const mapSettings = r => ({whatsapp:r.whatsapp,instagram:r.instagram,currency:r.currency,heroTitle:r.hero_title,heroText:r.hero_text});
+const mapProduct = r => ({id:+r.id,name:r.name,cat:r.cat,price:+r.price,desc:r.descr||'',image:SB.img(r.image),available:r.available!==false});
 async function loadStore(){
   try{
-    const r = await fetch('/api/store',{cache:'no-store'});
-    if(!r.ok) throw 0;
-    const d = await r.json();
-    SETTINGS = d.settings; PRODUCTS = d.products; ONLINE = true;
+    if(!SB.ready) throw 0;
+    const [st,pr] = await Promise.all([SB.get('settings?id=eq.1&select=*'),SB.get('products?select=*&order=id.desc')]);
+    if(st[0]) SETTINGS = mapSettings(st[0]);
+    PRODUCTS = pr.map(mapProduct); ONLINE = true;
   }catch(e){ ONLINE = false; }
   applySettings(); renderCats(); renderGrid(); renderCart();
 }
@@ -237,14 +241,12 @@ async function sendOrder(via){
   if(via==='wa'){ window.open(waLink(msg),'_blank'); }
   else if(via==='ig'){ navigator.clipboard&&navigator.clipboard.writeText(msg); toast('تم نسخ الطلب، الصقه في المحادثة'); window.open(igLink(),'_blank'); }
   else {
-    if(!ONLINE) return toast('الطلب عبر الموقع يحتاج تشغيل الخادم');
+    if(!ONLINE) return toast('الطلب عبر الموقع غير مفعّل بعد');
     try{
-      const r=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,phone,address:addr,items:ids.map(id=>({id:+id,qty:cart[id]}))})});
-      const d=await r.json();
-      if(!r.ok) return toast(d.error||'تعذر إرسال الطلب');
+      const id = await SB.rpc('place_order',{p_name:name,p_phone:phone,p_address:addr,p_items:ids.map(id=>({id:+id,qty:cart[id]}))});
       cart={};save();toggleCart(false);
-      toast('تم استلام طلبك رقم #'+d.id+' ✓ سنتواصل معك قريباً');
-    }catch(e){toast('تعذر الاتصال بالخادم')}
+      toast('تم استلام طلبك رقم #'+id+' ✓ سنتواصل معك قريباً');
+    }catch(e){toast(e.message||'تعذر إرسال الطلب')}
   }
 }
 
@@ -274,6 +276,6 @@ loadStore(); renderCart();
   document.querySelector('.brand').addEventListener('click',function(e){e.preventDefault();window.scrollTo({top:0,behavior:'smooth'})});
 })();
 </script>
-<script src="/owner.js" defer></script>
+<script src="owner.js" defer></script>
 </body>
 </html>
