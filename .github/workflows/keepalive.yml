@@ -1,0 +1,13 @@
+name: keepalive
+on:
+  schedule:
+    - cron: '0 6 */3 * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase so the free project never pauses
+        run: |
+          curl -fsS "https://izzdajfwsqdqvausngqs.supabase.co/rest/v1/settings?id=eq.1&select=id" \
+            -H "apikey: sb_publishable_YE2YW1_qDKS40m3A1Qa0Aw_vU1kv9Wl" > /dev/null
