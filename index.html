@@ -198,7 +198,6 @@ header.scrolled{padding-top:7px;padding-bottom:7px;box-shadow:0 6px 20px rgba(0,
 .sp-name{font-family:'Cairo',sans-serif;letter-spacing:8px;font-size:.78rem;color:var(--gold2);opacity:0;animation:fadeup 1.4s 1.5s forwards;padding-right:8px}
 .sp-sub{font-family:'Amiri',serif;color:var(--muted);font-size:1.05rem;opacity:0;animation:fadeup 1.4s 1.9s forwards}
 @keyframes fadeup{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){*,*::after{animation:none!important;transition:none!important}}
 @media(max-width:480px){.owner-btn{padding:7px 10px;font-size:.75rem}.brand-name{font-size:1rem}.brand-name small{font-size:.5rem;letter-spacing:2px}.brand .emblem{height:40px}header.scrolled .emblem{height:32px}.cart-btn{padding:8px 11px;font-size:.78rem}.brand{gap:8px}header{padding-left:3%;padding-right:3%}}
 </style>
 <link rel="stylesheet" href="owner.css">
@@ -471,7 +470,7 @@ loadStore(); renderCart();
 (function(){
   var s=document.getElementById('splash'),seen=false,deep=/[?&](p|order)=/.test(location.search);
   try{seen=sessionStorage.getItem('splashSeen')}catch(e){}
-  if(seen||deep||matchMedia('(prefers-reduced-motion: reduce)').matches){s.remove()}
+  if(seen||deep){s.remove()}
   else{
     var d=document.getElementById('spDust');
     for(var i=0;i<18;i++){var e=document.createElement('i');e.style.left=(4+Math.random()*92)+'%';e.style.bottom=(Math.random()*55)+'%';e.style.animationDelay=(Math.random()*4.5)+'s';e.style.animationDuration=(3.6+Math.random()*3)+'s';d.appendChild(e)}
